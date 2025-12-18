@@ -1,13 +1,574 @@
 <!DOCTYPE html>
 <html lang="fr">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NEXUS OFFICE - Mobile-First Editor</title>
     <script src="https://cdn.tailwindcss.com"></script>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        [contenteditable] {
+            outline: none;
+        }
+        .prose { max-width: none; }
+        .image-container {
+            border: 2px dashed transparent;
+            transition: all 0.2s;
+        }
+        .image-container:hover {
+            border-color: #a855f7;
+        }
+        .image-container.dragging {
+            opacity: 0.7;
+            cursor: grabbing !important;
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white">
+    
+    <!-- Header -->
+    <div class="bg-black/30 backdrop-blur-xl border-b border-white/10 fixed top-0 left-0 right-0 z-50">
+        <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center">
+                    <i data-lucide="file-text" class="w-5 h-5"></i>
+                </div>
+                <input type="text" id="fileName" value="Untitled Document" 
+                       class="bg-transparent border-none outline-none text-lg font-semibold focus:ring-2 focus:ring-purple-500 rounded px-2 w-48">
+            </div>
+            
+            <div class="flex items-center gap-2">
+                <button onclick="toggleLibrary()" class="p-2 hover:bg-white/10 rounded-lg transition" title="Bibliothèque">
+                    <i data-lucide="folder-open" class="w-5 h-5"></i>
+                </button>
+                <button onclick="createNewDocument()" class="p-2 hover:bg-white/10 rounded-lg transition" title="Nouveau">
+                    <i data-lucide="plus" class="w-5 h-5"></i>
+                </button>
+                <button onclick="saveDocument()" class="p-2 hover:bg-white/10 rounded-lg transition" title="Sauvegarder">
+                    <i data-lucide="save" class="w-5 h-5"></i>
+                </button>
+                <button onclick="showShareModal()" class="p-2 hover:bg-white/10 rounded-lg transition" title="Partager">
+                    <i data-lucide="share-2" class="w-5 h-5"></i>
+                </button>
+                <button onclick="toggleExportMenu()" class="p-2 hover:bg-white/10 rounded-lg transition" title="Exporter">
+                    <i data-lucide="download" class="w-5 h-5"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Export Menu -->
+        <div id="exportMenu" class="hidden absolute right-4 top-16 bg-slate-800 rounded-lg shadow-2xl border border-white/10 p-2 min-w-[200px]">
+            <button onclick="exportToTxt()" class="w-full text-left px-4 py-2 hover:bg-white/10 rounded flex items-center gap-2">
+                <i data-lucide="file-text" class="w-4 h-4"></i> Export TXT
+            </button>
+            <button onclick="exportToHtml()" class="w-full text-left px-4 py-2 hover:bg-white/10 rounded flex items-center gap-2">
+                <i data-lucide="code" class="w-4 h-4"></i> Export HTML
+            </button>
+            <button onclick="exportToPdf()" class="w-full text-left px-4 py-2 hover:bg-white/10 rounded flex items-center gap-2">
+                <i data-lucide="file" class="w-4 h-4"></i> Export PDF
+            </button>
+        </div>
+
+        <!-- Library Panel -->
+        <div id="libraryPanel" class="hidden absolute left-4 right-4 top-16 bg-slate-800 rounded-lg shadow-2xl border border-white/10 p-4 max-h-[400px] overflow-y-auto">
+            <h3 class="text-lg font-bold mb-3">Documents (<span id="docCount">0</span>)</h3>
+            <div id="libraryList"></div>
+        </div>
+    </div>
+
+    <!-- Toolbar -->
+    <div id="toolbar" class="bg-black/20 backdrop-blur-xl border-b border-white/10 fixed top-[57px] left-0 right-0 z-40">
+        <div class="max-w-6xl mx-auto px-4 py-2 flex items-center gap-1 overflow-x-auto">
+            <input type="file" id="fileInput" accept=".txt,.md,.pdf,.docx" class="hidden">
+            <button onclick="document.getElementById('fileInput').click()" class="p-2 hover:bg-white/10 rounded-lg transition" title="Upload">
+                <i data-lucide="upload" class="w-4 h-4"></i>
+            </button>
+
+            <input type="file" id="imageInput" accept="image/*" class="hidden">
+            <button onclick="document.getElementById('imageInput').click()" class="p-2 hover:bg-white/10 rounded-lg transition" title="Image">
+                <i data-lucide="image" class="w-4 h-4"></i>
+            </button>
+
+            <div class="w-px h-6 bg-white/20 mx-1"></div>
+
+            <button onclick="formatText('bold')" class="p-2 hover:bg-white/10 rounded-lg transition" title="Gras">
+                <i data-lucide="bold" class="w-4 h-4"></i>
+            </button>
+            <button onclick="formatText('italic')" class="p-2 hover:bg-white/10 rounded-lg transition" title="Italique">
+                <i data-lucide="italic" class="w-4 h-4"></i>
+            </button>
+            <button onclick="formatText('underline')" class="p-2 hover:bg-white/10 rounded-lg transition" title="Souligné">
+                <i data-lucide="underline" class="w-4 h-4"></i>
+            </button>
+
+            <div class="w-px h-6 bg-white/20 mx-1"></div>
+
+            <button onclick="formatText('formatBlock', 'h1')" class="p-2 hover:bg-white/10 rounded-lg transition" title="Titre 1">
+                <i data-lucide="heading-1" class="w-4 h-4"></i>
+            </button>
+            <button onclick="formatText('formatBlock', 'h2')" class="p-2 hover:bg-white/10 rounded-lg transition" title="Titre 2">
+                <i data-lucide="heading-2" class="w-4 h-4"></i>
+            </button>
+
+            <div class="w-px h-6 bg-white/20 mx-1"></div>
+
+            <button onclick="formatText('insertUnorderedList')" class="p-2 hover:bg-white/10 rounded-lg transition" title="Liste">
+                <i data-lucide="list" class="w-4 h-4"></i>
+            </button>
+            <button onclick="formatText('insertOrderedList')" class="p-2 hover:bg-white/10 rounded-lg transition" title="Liste numérotée">
+                <i data-lucide="list-ordered" class="w-4 h-4"></i>
+            </button>
+
+            <div class="w-px h-6 bg-white/20 mx-1"></div>
+
+            <button onclick="formatText('justifyLeft')" class="p-2 hover:bg-white/10 rounded-lg transition" title="Gauche">
+                <i data-lucide="align-left" class="w-4 h-4"></i>
+            </button>
+            <button onclick="formatText('justifyCenter')" class="p-2 hover:bg-white/10 rounded-lg transition" title="Centre">
+                <i data-lucide="align-center" class="w-4 h-4"></i>
+            </button>
+            <button onclick="formatText('justifyRight')" class="p-2 hover:bg-white/10 rounded-lg transition" title="Droite">
+                <i data-lucide="align-right" class="w-4 h-4"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- Share Modal -->
+    <div id="shareModal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+        <div class="bg-slate-800 rounded-2xl shadow-2xl border border-white/10 p-6 max-w-lg w-full">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-xl font-bold flex items-center gap-2">
+                    <i data-lucide="share-2" class="w-6 h-6 text-purple-400"></i>
+                    Partager le document
+                </h3>
+                <button onclick="hideShareModal()" class="p-2 hover:bg-white/10 rounded-lg transition">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            
+            <p class="text-white/70 text-sm mb-4">
+                Copiez ce lien pour partager votre document. Le destinataire pourra le consulter, le modifier et générer un nouveau lien.
+            </p>
+            
+            <div class="bg-black/30 rounded-lg p-3 mb-4 break-all text-sm font-mono text-purple-300" id="shareLink"></div>
+            
+            <button onclick="copyShareLink()" id="copyBtn" class="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-semibold py-3 rounded-lg transition flex items-center justify-center gap-2">
+                <i data-lucide="copy" class="w-5 h-5"></i>
+                Copier le lien
+            </button>
+            
+            <p class="text-xs text-white/50 mt-3 text-center">
+                ⚠️ Le lien contient tout le document. Ne partagez qu'avec des personnes de confiance.
+            </p>
+        </div>
+    </div>
+
+    <!-- Main Editor -->
+    <div class="max-w-4xl mx-auto px-4 pt-32 pb-8">
+        <div class="bg-white rounded-lg shadow-2xl min-h-[800px] p-8 text-gray-900 relative">
+            <div id="imagesLayer"></div>
+            <div id="editor" contenteditable="true" class="outline-none min-h-[600px] relative z-0" style="line-height: 1.8; font-size: 16px;"></div>
+        </div>
+    </div>
+
+    <!-- Mobile Toolbar Toggle -->
+    <button onclick="toggleToolbar()" class="fixed bottom-6 right-6 bg-purple-600 text-white p-4 rounded-full shadow-2xl hover:bg-purple-700 transition z-50">
+        <i data-lucide="menu" class="w-6 h-6"></i>
+    </button>
+
+    <!-- Footer -->
+    <div class="text-center py-6 text-sm text-white/60">
+        <p>NEXUS OFFICE v0.5 - Mobile-First Editor</p>
+        <p class="text-xs mt-1">HTML Standalone • Appui long pour déplacer • Drag coin pour redimensionner</p>
+    </div>
+
+    <script>
+        // Initialize PDF.js
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        let currentDocId = null;
+        let images = [];
+        let draggingImage = null;
+        let resizingImage = null;
+
+        // Load from URL or localStorage on init
+        window.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+            
+            const urlParams = new URLSearchParams(window.location.search);
+            const docParam = urlParams.get('doc');
+            
+            if (docParam) {
+                try {
+                    const decoded = JSON.parse(atob(decodeURIComponent(docParam)));
+                    document.getElementById('fileName').value = decoded.fileName || 'Shared Document';
+                    document.getElementById('editor').innerHTML = decoded.content || '';
+                    images = decoded.images || [];
+                    renderImages();
+                    alert('📄 Document partagé chargé !');
+                } catch (error) {
+                    console.error('Erreur:', error);
+                    alert('❌ Lien de partage invalide');
+                }
+            } else {
+                loadLibrary();
+            }
+
+            // File input handler
+            document.getElementById('fileInput').addEventListener('change', handleFileUpload);
+            document.getElementById('imageInput').addEventListener('change', handleImageUpload);
+        });
+
+        function formatText(command, value = null) {
+            document.execCommand(command, false, value);
+            document.getElementById('editor').focus();
+        }
+
+        async function handleFileUpload(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            document.getElementById('fileName').value = file.name.replace(/\.[^/.]+$/, '');
+
+            if (file.type === 'application/pdf') {
+                await loadPdf(file);
+            } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+                await loadDocx(file);
+            } else {
+                const text = await file.text();
+                document.getElementById('editor').innerHTML = text.replace(/\n/g, '<br>');
+            }
+        }
+
+        async function loadPdf(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            
+            let fullText = '';
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const textContent = await page.getTextContent();
+                const pageText = textContent.items.map(item => item.str).join(' ');
+                fullText += pageText + '\n\n';
+            }
+            
+            document.getElementById('editor').innerHTML = fullText.replace(/\n/g, '<br>');
+            alert('✅ PDF chargé avec succès !');
+        }
+
+        async function loadDocx(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const result = await mammoth.convertToHtml({ arrayBuffer });
+            document.getElementById('editor').innerHTML = result.value;
+        }
+
+        function handleImageUpload(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                images.push({
+                    id: Date.now(),
+                    src: event.target.result,
+                    x: 50,
+                    y: 50,
+                    width: 300,
+                    height: 200
+                });
+                renderImages();
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function renderImages() {
+            const layer = document.getElementById('imagesLayer');
+            layer.innerHTML = '';
+            
+            images.forEach(img => {
+                const container = document.createElement('div');
+                container.className = 'image-container absolute group';
+                container.style.cssText = `left: ${img.x}px; top: ${img.y}px; width: ${img.width}px; height: ${img.height}px; cursor: grab; z-index: 10;`;
+                
+                container.innerHTML = `
+                    <img src="${img.src}" class="rounded-lg shadow-lg w-full h-full object-cover" draggable="false">
+                    <button onclick="removeImage(${img.id})" class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition z-20">
+                        <i data-lucide="x" class="w-4 h-4"></i>
+                    </button>
+                    <div onmousedown="startResize(${img.id}, event)" ontouchstart="startResize(${img.id}, event)" 
+                         class="absolute bottom-0 right-0 w-8 h-8 bg-purple-500 rounded-tl-lg cursor-se-resize opacity-0 group-hover:opacity-100 transition flex items-center justify-center z-20">
+                        <div class="w-3 h-3 border-r-2 border-b-2 border-white"></div>
+                    </div>
+                `;
+                
+                let longPressTimer;
+                container.addEventListener('mousedown', (e) => {
+                    if (!e.target.closest('button') && !e.target.closest('[onmousedown]')) {
+                        startDrag(img.id, e);
+                    }
+                });
+                container.addEventListener('touchstart', (e) => {
+                    if (!e.target.closest('button') && !e.target.closest('[ontouchstart]')) {
+                        longPressTimer = setTimeout(() => startDrag(img.id, e), 300);
+                    }
+                });
+                container.addEventListener('touchend', () => clearTimeout(longPressTimer));
+                
+                layer.appendChild(container);
+            });
+            
+            lucide.createIcons();
+        }
+
+        function startDrag(id, e) {
+            const img = images.find(i => i.id === id);
+            const clientX = e.clientX || e.touches?.[0]?.clientX;
+            const clientY = e.clientY || e.touches?.[0]?.clientY;
+            
+            draggingImage = {
+                id,
+                offsetX: clientX - img.x,
+                offsetY: clientY - img.y
+            };
+
+            document.addEventListener('mousemove', onDrag);
+            document.addEventListener('mouseup', stopDrag);
+            document.addEventListener('touchmove', onDrag);
+            document.addEventListener('touchend', stopDrag);
+        }
+
+        function onDrag(e) {
+            if (!draggingImage) return;
+            const clientX = e.clientX || e.touches?.[0]?.clientX;
+            const clientY = e.clientY || e.touches?.[0]?.clientY;
+            
+            const img = images.find(i => i.id === draggingImage.id);
+            img.x = clientX - draggingImage.offsetX;
+            img.y = clientY - draggingImage.offsetY;
+            renderImages();
+        }
+
+        function stopDrag() {
+            draggingImage = null;
+            document.removeEventListener('mousemove', onDrag);
+            document.removeEventListener('mouseup', stopDrag);
+            document.removeEventListener('touchmove', onDrag);
+            document.removeEventListener('touchend', stopDrag);
+        }
+
+        function startResize(id, e) {
+            e.stopPropagation();
+            const img = images.find(i => i.id === id);
+            const clientX = e.clientX || e.touches?.[0]?.clientX;
+            const clientY = e.clientY || e.touches?.[0]?.clientY;
+            
+            resizingImage = {
+                id,
+                startX: clientX,
+                startY: clientY,
+                startWidth: img.width,
+                startHeight: img.height
+            };
+
+            document.addEventListener('mousemove', onResize);
+            document.addEventListener('mouseup', stopResize);
+            document.addEventListener('touchmove', onResize);
+            document.addEventListener('touchend', stopResize);
+        }
+
+        function onResize(e) {
+            if (!resizingImage) return;
+            const clientX = e.clientX || e.touches?.[0]?.clientX;
+            const clientY = e.clientY || e.touches?.[0]?.clientY;
+            
+            const deltaX = clientX - resizingImage.startX;
+            const deltaY = clientY - resizingImage.startY;
+            
+            const img = images.find(i => i.id === resizingImage.id);
+            img.width = Math.max(100, resizingImage.startWidth + deltaX);
+            img.height = Math.max(100, resizingImage.startHeight + deltaY);
+            renderImages();
+        }
+
+        function stopResize() {
+            resizingImage = null;
+            document.removeEventListener('mousemove', onResize);
+            document.removeEventListener('mouseup', stopResize);
+            document.removeEventListener('touchmove', onResize);
+            document.removeEventListener('touchend', stopResize);
+        }
+
+        function removeImage(id) {
+            images = images.filter(i => i.id !== id);
+            renderImages();
+        }
+
+        function saveDocument() {
+            const doc = {
+                id: currentDocId || Date.now(),
+                fileName: document.getElementById('fileName').value,
+                content: document.getElementById('editor').innerHTML,
+                images,
+                timestamp: new Date().toISOString()
+            };
+
+            let library = JSON.parse(localStorage.getItem('nexus-office-library') || '[]');
+            const index = library.findIndex(d => d.id === doc.id);
+            
+            if (index >= 0) {
+                library[index] = doc;
+            } else {
+                library.push(doc);
+                currentDocId = doc.id;
+            }
+            
+            localStorage.setItem('nexus-office-library', JSON.stringify(library));
+            alert('✅ Document sauvegardé');
+            loadLibrary();
+        }
+
+        function loadLibrary() {
+            const library = JSON.parse(localStorage.getItem('nexus-office-library') || '[]');
+            document.getElementById('docCount').textContent = library.length;
+            
+            const list = document.getElementById('libraryList');
+            if (library.length === 0) {
+                list.innerHTML = '<p class="text-white/60 text-sm">Aucun document sauvegardé</p>';
+            } else {
+                list.innerHTML = library.map(doc => `
+                    <div class="flex items-center justify-between bg-white/5 p-3 rounded-lg hover:bg-white/10 transition mb-2">
+                        <button onclick="loadDocument(${doc.id})" class="flex items-center gap-2 flex-1 text-left">
+                            <i data-lucide="file" class="w-4 h-4"></i>
+                            <div>
+                                <p class="font-medium">${doc.fileName}</p>
+                                <p class="text-xs text-white/60">${new Date(doc.timestamp).toLocaleDateString('fr-FR')}</p>
+                            </div>
+                        </button>
+                        <button onclick="deleteDocument(${doc.id})" class="p-2 hover:bg-red-500/20 rounded transition">
+                            <i data-lucide="trash-2" class="w-4 h-4 text-red-400"></i>
+                        </button>
+                    </div>
+                `).join('');
+                lucide.createIcons();
+            }
+        }
+
+        function loadDocument(id) {
+            const library = JSON.parse(localStorage.getItem('nexus-office-library') || '[]');
+            const doc = library.find(d => d.id === id);
+            if (doc) {
+                currentDocId = doc.id;
+                document.getElementById('fileName').value = doc.fileName;
+                document.getElementById('editor').innerHTML = doc.content;
+                images = doc.images || [];
+                renderImages();
+                toggleLibrary();
+            }
+        }
+
+        function deleteDocument(id) {
+            if (!confirm('Supprimer ce document ?')) return;
+            let library = JSON.parse(localStorage.getItem('nexus-office-library') || '[]');
+            library = library.filter(d => d.id !== id);
+            localStorage.setItem('nexus-office-library', JSON.stringify(library));
+            if (currentDocId === id) createNewDocument();
+            loadLibrary();
+        }
+
+        function createNewDocument() {
+            currentDocId = null;
+            document.getElementById('fileName').value = 'Untitled Document';
+            document.getElementById('editor').innerHTML = '';
+            images = [];
+            renderImages();
+            toggleLibrary();
+            window.history.pushState({}, '', window.location.pathname);
+        }
+
+        function showShareModal() {
+            const doc = {
+                fileName: document.getElementById('fileName').value,
+                content: document.getElementById('editor').innerHTML,
+                images
+            };
+            
+            const encoded = encodeURIComponent(btoa(JSON.stringify(doc)));
+            const link = `${window.location.origin}${window.location.pathname}?doc=${encoded}`;
+            
+            document.getElementById('shareLink').textContent = link;
+            document.getElementById('shareModal').classList.remove('hidden');
+        }
+
+        function hideShareModal() {
+            document.getElementById('shareModal').classList.add('hidden');
+        }
+
+        async function copyShareLink() {
+            const link = document.getElementById('shareLink').textContent;
+            try {
+                await navigator.clipboard.writeText(link);
+                const btn = document.getElementById('copyBtn');
+                btn.innerHTML = '<i data-lucide="check" class="w-5 h-5"></i> Lien copié !';
+                lucide.createIcons();
+                setTimeout(() => {
+                    btn.innerHTML = '<i data-lucide="copy" class="w-5 h-5"></i> Copier le lien';
+                    lucide.createIcons();
+                }, 2000);
+            } catch (error) {
+                alert('Erreur copie. Copiez manuellement le lien ci-dessus.');
+            }
+        }
+
+        function toggleToolbar() {
+            document.getElementById('toolbar').classList.toggle('hidden');
+        }
+
+        function toggleLibrary() {
+            const panel = document.getElementById('libraryPanel');
+            panel.classList.toggle('hidden');
+            if (!panel.classList.contains('hidden')) loadLibrary();
+        }
+
+        function toggleExportMenu() {
+            document.getElementById('exportMenu').classList.toggle('hidden');
+        }
+
+        function exportToTxt() {
+            const text = document.getElementById('editor').innerText;
+            const blob = new Blob([text], { type: 'text/plain' });
+            download(blob, document.getElementById('fileName').value + '.txt');
+        }
+
+        function exportToHtml() {
+            const html = `<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>${document.getElementById('fileName').value}</title>
+<style>body{font-family:Arial;max-width:800px;margin:40px auto;padding:20px;line-height:1.6;position:relative}img{position:absolute}</style>
+</head>
+<body>
+${images.map(img => `<img src="${img.src}" style="width:${img.width}px;height:${img.height}px;left:${img.x}px;top:${img.y}px">`).join('')}
+${document.getElementById('editor').innerHTML}
+</body></html>`;
+            const blob = new Blob([html], { type: 'text/html' });
+            download(blob, document.getElementById('fileName').value + '.html');
+        }
+
+        function exportToPdf() {
+            window.print();
+        }
+
+        function download(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+            toggleExportMenu();
+        }
+    </script>
+</body>
 </html>
